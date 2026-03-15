@@ -1,0 +1,8 @@
+.env
+.gocache/
+*.exe
+*.test
+*_test.go
+coverage.out
+server*.out
+server*.err
