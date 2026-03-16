@@ -2,10 +2,12 @@
 
 A small Go URL shortener with:
 
+- A built-in browser UI at `/`
 - `POST /shorten` to create short links
 - `GET /{shortCode}` to redirect to the original URL
+- `GET /stats/{shortCode}` to view basic link analytics
 - Postgres-backed storage for persistence
-- in-memory fallback when `DATABASE_URL` is not set
+- Schema setup handled automatically on startup
 
 ## Stack
 
@@ -27,16 +29,6 @@ Start PostgreSQL 18 in Docker:
 docker run --name url-shortener-db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=url_shortener -p 5432:5432 -v url_shortener_pg18:/var/lib/postgresql -d postgres:18
 ```
 
-Create the table if needed:
-
-```sql
-CREATE TABLE IF NOT EXISTS shortened_urls (
-    short_code TEXT PRIMARY KEY,
-    target_url TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);
-```
-
 Local configuration lives in `.env`. Example:
 
 ```env
@@ -52,10 +44,16 @@ go run .
 
 ## API
 
-Health check:
+Home page:
 
 ```http
 GET /
+```
+
+Health check:
+
+```http
+GET /healthz
 ```
 
 Create short URL:
@@ -83,9 +81,15 @@ Redirect:
 GET /Ab12Cd
 ```
 
+Stats:
+
+```http
+GET /stats/Ab12Cd
+```
+
 ## Notes
 
 - Only absolute `http://` and `https://` URLs are accepted.
 - Extra JSON fields in the shorten request are rejected.
-- If `DATABASE_URL` is missing, the app falls back to in-memory storage.
-- In-memory data is lost when the server stops.
+- `DATABASE_URL` is required; the app always uses PostgreSQL.
+- The app ensures the required table/columns exist when it starts.
