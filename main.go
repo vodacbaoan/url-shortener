@@ -11,7 +11,6 @@ import (
 	"net/url"
 	"os"
 	"strings"
-	"sync"
 )
 
 const shortCodeLength = 6
@@ -33,12 +32,6 @@ type urlStorage interface {
 	IncrementClickCount(shortCode string) error
 }
 
-type memoryURLStore struct {
-	mu     sync.RWMutex
-	urls   map[string]string
-	clicks map[string]int
-}
-
 type server struct {
 	storage urlStorage
 }
@@ -46,7 +39,7 @@ type server struct {
 func newStorage() (urlStorage, func() error, error) {
 	databaseURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if databaseURL == "" {
-		return newMemoryURLStore(), func() error { return nil }, nil
+		return nil, nil, errors.New("DATABASE_URL is required")
 	}
 
 	store, err := newPostgresURLStore(databaseURL)
@@ -59,50 +52,6 @@ func newStorage() (urlStorage, func() error, error) {
 
 func logRequest(r *http.Request) {
 	log.Printf("received request: method=%s path=%s query=%s remote=%s\n", r.Method, r.URL.Path, r.URL.RawQuery, r.RemoteAddr)
-}
-
-func newMemoryURLStore() *memoryURLStore {
-	return &memoryURLStore{
-		urls:   make(map[string]string),
-		clicks: make(map[string]int),
-	}
-}
-
-func (s *memoryURLStore) Save(shortCode, targetURL string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.urls[shortCode]; exists {
-		return errShortCodeExists
-	}
-
-	s.urls[shortCode] = targetURL
-	s.clicks[shortCode] = 0
-	return nil
-}
-
-func (s *memoryURLStore) Lookup(shortCode string) (string, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	targetURL, ok := s.urls[shortCode]
-	if !ok {
-		return "", errShortCodeNotFound
-	}
-
-	return targetURL, nil
-}
-
-func (s *memoryURLStore) IncrementClickCount(shortCode string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if _, exists := s.urls[shortCode]; !exists {
-		return errShortCodeNotFound
-	}
-
-	s.clicks[shortCode]++
-	return nil
 }
 
 func createShortCode(storage urlStorage, targetURL string) (string, error) {
@@ -261,11 +210,7 @@ func main() {
 	http.HandleFunc("/shorten", srv.handleShorten)
 
 	addr := ":" + envOrDefault("PORT", "8081")
-	if _, ok := storage.(*postgresURLStore); ok {
-		log.Printf("using postgres storage\n")
-	} else {
-		log.Printf("using in-memory storage\n")
-	}
+	log.Printf("using postgres storage\n")
 	log.Printf("server listening on http://localhost%s\n", addr)
 	log.Fatal(http.ListenAndServe(addr, nil))
 }
