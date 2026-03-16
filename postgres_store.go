@@ -36,10 +36,19 @@ func (s *postgresURLStore) ensureSchema() error {
 	CREATE TABLE IF NOT EXISTS shortened_urls (
 		short_code TEXT PRIMARY KEY,
 		target_url TEXT NOT NULL,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+		click_count INTEGER NOT NULL DEFAULT 0
 	);`
 
-	_, err := s.db.Exec(query)
+	if _, err := s.db.Exec(query); err != nil {
+		return err
+	}
+
+	const addClickCountQuery = `
+	ALTER TABLE shortened_urls
+	ADD COLUMN IF NOT EXISTS click_count INTEGER NOT NULL DEFAULT 0;`
+
+	_, err := s.db.Exec(addClickCountQuery)
 	return err
 }
 
@@ -81,6 +90,28 @@ func (s *postgresURLStore) Lookup(shortCode string) (string, error) {
 	}
 
 	return targetURL, nil
+}
+
+func (s *postgresURLStore) IncrementClickCount(shortCode string) error {
+	const query = `
+	UPDATE shortened_urls
+	SET click_count = click_count + 1
+	WHERE short_code = $1;`
+
+	result, err := s.db.Exec(query, shortCode)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return errShortCodeNotFound
+	}
+
+	return nil
 }
 
 func (s *postgresURLStore) Close() error {

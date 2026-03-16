@@ -30,11 +30,13 @@ var errShortCodeNotFound = errors.New("short code not found")
 type urlStorage interface {
 	Save(shortCode, targetURL string) error
 	Lookup(shortCode string) (string, error)
+	IncrementClickCount(shortCode string) error
 }
 
 type memoryURLStore struct {
-	mu   sync.RWMutex
-	urls map[string]string
+	mu     sync.RWMutex
+	urls   map[string]string
+	clicks map[string]int
 }
 
 type server struct {
@@ -61,7 +63,8 @@ func logRequest(r *http.Request) {
 
 func newMemoryURLStore() *memoryURLStore {
 	return &memoryURLStore{
-		urls: make(map[string]string),
+		urls:   make(map[string]string),
+		clicks: make(map[string]int),
 	}
 }
 
@@ -74,6 +77,7 @@ func (s *memoryURLStore) Save(shortCode, targetURL string) error {
 	}
 
 	s.urls[shortCode] = targetURL
+	s.clicks[shortCode] = 0
 	return nil
 }
 
@@ -87,6 +91,18 @@ func (s *memoryURLStore) Lookup(shortCode string) (string, error) {
 	}
 
 	return targetURL, nil
+}
+
+func (s *memoryURLStore) IncrementClickCount(shortCode string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.urls[shortCode]; !exists {
+		return errShortCodeNotFound
+	}
+
+	s.clicks[shortCode]++
+	return nil
 }
 
 func createShortCode(storage urlStorage, targetURL string) (string, error) {
@@ -160,6 +176,10 @@ func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 			log.Printf("failed to look up short code %q: %v\n", shortCode, err)
 			http.Error(w, "failed to look up short code", http.StatusInternalServerError)
 			return
+		}
+		if err := s.storage.IncrementClickCount(shortCode); err != nil {
+			// Redirecting is still the primary behavior; analytics should not break it.
+			log.Printf("failed to increment click count for short code %q: %v\n", shortCode, err)
 		}
 
 		http.Redirect(w, r, targetURL, http.StatusFound)
