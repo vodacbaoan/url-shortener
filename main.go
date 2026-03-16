@@ -118,6 +118,11 @@ func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.URL.Path == "/" {
+		serveHomePage(w)
+		return
+	}
+
 	if r.URL.Path != "/" {
 		shortCode := strings.TrimPrefix(r.URL.Path, "/")
 		if strings.Contains(shortCode, "/") {
@@ -141,6 +146,15 @@ func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Redirect(w, r, targetURL, http.StatusFound)
+		return
+	}
+}
+
+func (s *server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	logRequest(r)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
@@ -246,6 +260,7 @@ func main() {
 	srv := &server{storage: storage}
 
 	http.HandleFunc("/", srv.handleRoot)
+	http.HandleFunc("/healthz", srv.handleHealthz)
 	http.HandleFunc("/shorten", srv.handleShorten)
 	http.HandleFunc("/stats/", srv.handleStats)
 
