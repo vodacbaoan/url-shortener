@@ -114,6 +114,29 @@ func (s *postgresURLStore) IncrementClickCount(shortCode string) error {
 	return nil
 }
 
+func (s *postgresURLStore) GetStats(shortCode string) (statsResponse, error) {
+	const query = `
+	SELECT short_code, target_url, click_count, created_at
+	FROM shortened_urls
+	WHERE short_code = $1;`
+
+	var stats statsResponse
+	err := s.db.QueryRow(query, shortCode).Scan(
+		&stats.ShortCode,
+		&stats.TargetURL,
+		&stats.ClickCount,
+		&stats.CreatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return statsResponse{}, errShortCodeNotFound
+	}
+	if err != nil {
+		return statsResponse{}, err
+	}
+
+	return stats, nil
+}
+
 func (s *postgresURLStore) Close() error {
 	return s.db.Close()
 }

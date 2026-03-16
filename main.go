@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 )
 
 const shortCodeLength = 6
@@ -23,6 +24,13 @@ type shortenResponse struct {
 	ShortCode string `json:"short_code"`
 }
 
+type statsResponse struct {
+	ShortCode  string    `json:"short_code"`
+	TargetURL  string    `json:"target_url"`
+	ClickCount int       `json:"click_count"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 var errShortCodeExists = errors.New("short code already exists")
 var errShortCodeNotFound = errors.New("short code not found")
 
@@ -30,6 +38,7 @@ type urlStorage interface {
 	Save(shortCode, targetURL string) error
 	Lookup(shortCode string) (string, error)
 	IncrementClickCount(shortCode string) error
+	GetStats(shortCode string) (statsResponse, error)
 }
 
 type server struct {
@@ -189,6 +198,36 @@ func (s *server) handleShorten(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
+	logRequest(r)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	shortCode := strings.TrimPrefix(r.URL.Path, "/stats/")
+	if shortCode == "" || shortCode == r.URL.Path || strings.Contains(shortCode, "/") {
+		http.NotFound(w, r)
+		return
+	}
+
+	stats, err := s.storage.GetStats(shortCode)
+	if errors.Is(err, errShortCodeNotFound) {
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		log.Printf("failed to load stats for short code %q: %v\n", shortCode, err)
+		http.Error(w, "failed to load stats", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(stats)
+}
+
 func main() {
 	if err := loadDotEnv(".env"); err != nil {
 		log.Fatal(err)
@@ -208,6 +247,7 @@ func main() {
 
 	http.HandleFunc("/", srv.handleRoot)
 	http.HandleFunc("/shorten", srv.handleShorten)
+	http.HandleFunc("/stats/", srv.handleStats)
 
 	addr := ":" + envOrDefault("PORT", "8081")
 	log.Printf("using postgres storage\n")
