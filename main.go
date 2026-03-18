@@ -2,11 +2,8 @@ package main
 
 import (
 	"crypto/rand"
-	"encoding/json"
 	"errors"
-	"io"
 	"log"
-	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,14 +32,22 @@ var errShortCodeExists = errors.New("short code already exists")
 var errShortCodeNotFound = errors.New("short code not found")
 
 type urlStorage interface {
-	Save(shortCode, targetURL string) error
+	Save(shortCode, targetURL string, userID int64) error
 	Lookup(shortCode string) (string, error)
 	IncrementClickCount(shortCode string) error
-	GetStats(shortCode string) (statsResponse, error)
+	GetStats(shortCode string, userID int64) (statsResponse, error)
+	CreateUser(email, passwordHash string) (userRecord, error)
+	GetUserByEmail(email string) (userRecord, error)
+	GetUserByID(userID int64) (userRecord, error)
+	StoreRefreshToken(userID int64, tokenHash string, expiresAt time.Time) error
+	RotateRefreshToken(currentTokenHash, newTokenHash string, expiresAt time.Time) (int64, error)
+	RevokeRefreshToken(tokenHash string) error
+	ListOwnedLinks(userID int64) ([]ownedLinkResponse, error)
 }
 
 type server struct {
 	storage urlStorage
+	auth    *authManager
 }
 
 func newStorage() (urlStorage, func() error, error) {
@@ -63,14 +68,14 @@ func logRequest(r *http.Request) {
 	log.Printf("received request: method=%s path=%s query=%s remote=%s\n", r.Method, r.URL.Path, r.URL.RawQuery, r.RemoteAddr)
 }
 
-func createShortCode(storage urlStorage, targetURL string) (string, error) {
+func createShortCode(storage urlStorage, targetURL string, userID int64) (string, error) {
 	for {
 		shortCode, err := generateShortCode()
 		if err != nil {
 			return "", err
 		}
 
-		if err := storage.Save(shortCode, targetURL); err == nil {
+		if err := storage.Save(shortCode, targetURL, userID); err == nil {
 			return shortCode, nil
 		} else if !errors.Is(err, errShortCodeExists) {
 			return "", err
@@ -169,22 +174,19 @@ func (s *server) handleShorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if err := ensureSameOrigin(r); err != nil {
+		http.Error(w, "invalid origin", http.StatusForbidden)
+		return
+	}
 
-	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
-	if err != nil || mediaType != "application/json" {
-		http.Error(w, "content type must be application/json", http.StatusUnsupportedMediaType)
+	user, ok := s.requireCurrentUser(w, r)
+	if !ok {
 		return
 	}
 
 	var req shortenRequest
-	decoder := json.NewDecoder(r.Body)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&req); err != nil {
-		http.Error(w, "invalid json body", http.StatusBadRequest)
-		return
-	}
-	if err := decoder.Decode(&struct{}{}); err != io.EOF {
-		http.Error(w, "request body must contain a single JSON object", http.StatusBadRequest)
+	if err := decodeJSONBody(r, &req); err != nil {
+		writeJSONBodyError(w, err)
 		return
 	}
 
@@ -193,13 +195,14 @@ func (s *server) handleShorten(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "url is required", http.StatusBadRequest)
 		return
 	}
+	var err error
 	req.URL, err = normalizeTargetURL(req.URL)
 	if err != nil {
 		http.Error(w, "url must be a valid http or https URL", http.StatusBadRequest)
 		return
 	}
 
-	shortCode, err := createShortCode(s.storage, req.URL)
+	shortCode, err := createShortCode(s.storage, req.URL, user.ID)
 	if err != nil {
 		http.Error(w, "failed to generate short code", http.StatusInternalServerError)
 		return
@@ -207,9 +210,7 @@ func (s *server) handleShorten(w http.ResponseWriter, r *http.Request) {
 
 	resp := shortenResponse{ShortCode: shortCode}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	writeJSONResponse(w, http.StatusOK, resp)
 }
 
 func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -220,15 +221,24 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	user, ok := s.requireCurrentUser(w, r)
+	if !ok {
+		return
+	}
+
 	shortCode := strings.TrimPrefix(r.URL.Path, "/stats/")
 	if shortCode == "" || shortCode == r.URL.Path || strings.Contains(shortCode, "/") {
 		http.NotFound(w, r)
 		return
 	}
 
-	stats, err := s.storage.GetStats(shortCode)
+	stats, err := s.storage.GetStats(shortCode, user.ID)
 	if errors.Is(err, errShortCodeNotFound) {
 		http.NotFound(w, r)
+		return
+	}
+	if errors.Is(err, errForbidden) {
+		http.Error(w, "forbidden", http.StatusForbidden)
 		return
 	}
 	if err != nil {
@@ -237,9 +247,7 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(stats)
+	writeJSONResponse(w, http.StatusOK, stats)
 }
 
 func main() {
@@ -257,10 +265,21 @@ func main() {
 		}
 	}()
 
-	srv := &server{storage: storage}
+	auth, err := newAuthManagerFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	srv := &server{storage: storage, auth: auth}
 
 	http.HandleFunc("/", srv.handleRoot)
 	http.HandleFunc("/healthz", srv.handleHealthz)
+	http.HandleFunc("/auth/signup", srv.handleSignup)
+	http.HandleFunc("/auth/login", srv.handleLogin)
+	http.HandleFunc("/auth/logout", srv.handleLogout)
+	http.HandleFunc("/auth/refresh", srv.handleRefresh)
+	http.HandleFunc("/me", srv.handleMe)
+	http.HandleFunc("/links", srv.handleLinks)
 	http.HandleFunc("/shorten", srv.handleShorten)
 	http.HandleFunc("/stats/", srv.handleStats)
 
