@@ -30,6 +30,11 @@ type statsResponse struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type apiRootResponse struct {
+	Service string `json:"service"`
+	Health  string `json:"health"`
+}
+
 var errShortCodeExists = errors.New("short code already exists")
 var errShortCodeNotFound = errors.New("short code not found")
 
@@ -126,7 +131,10 @@ func (s *server) handleRoot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if r.URL.Path == "/" {
-		serveHomePage(w)
+		writeJSONResponse(w, http.StatusOK, apiRootResponse{
+			Service: "url-shortener-api",
+			Health:  "/healthz",
+		})
 		return
 	}
 
@@ -254,6 +262,7 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
 
 func (s *server) routes() http.Handler {
 	r := chi.NewRouter()
+	r.Use(corsMiddleware)
 
 	r.Get("/", s.handleRoot)
 	r.Get("/healthz", s.handleHealthz)

@@ -254,16 +254,69 @@ func requestOrigin(r *http.Request) string {
 	return scheme + "://" + r.Host
 }
 
+func allowedFrontendOrigins() []string {
+	rawOrigins := envOrDefault("FRONTEND_ORIGIN", "http://localhost:3000")
+	origins := strings.Split(rawOrigins, ",")
+	allowed := make([]string, 0, len(origins))
+
+	for _, origin := range origins {
+		origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+		if origin != "" {
+			allowed = append(allowed, origin)
+		}
+	}
+
+	return allowed
+}
+
+func isAllowedOrigin(r *http.Request, origin string) bool {
+	origin = strings.TrimRight(strings.TrimSpace(origin), "/")
+	if origin == "" {
+		return true
+	}
+	if origin == requestOrigin(r) {
+		return true
+	}
+
+	for _, allowedOrigin := range allowedFrontendOrigins() {
+		if origin == allowedOrigin {
+			return true
+		}
+	}
+
+	return false
+}
+
 func ensureSameOrigin(r *http.Request) error {
 	origin := strings.TrimSpace(r.Header.Get("Origin"))
-	if origin == "" {
-		return nil
-	}
-	if origin != requestOrigin(r) {
+	if !isAllowedOrigin(r, origin) {
 		return errInvalidOrigin
 	}
 
 	return nil
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := strings.TrimSpace(r.Header.Get("Origin"))
+		if origin != "" && isAllowedOrigin(r, origin) {
+			w.Header().Set("Access-Control-Allow-Origin", strings.TrimRight(origin, "/"))
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		}
+
+		if r.Method == http.MethodOptions {
+			if origin != "" && !isAllowedOrigin(r, origin) {
+				http.Error(w, "invalid origin", http.StatusForbidden)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 func userToResponse(user userRecord) userResponse {

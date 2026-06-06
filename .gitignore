@@ -1,8 +1,14 @@
 .env
+.env.local
 .gocache/
 *.exe
 *.test
-*_test.go
 coverage.out
 server*.out
 server*.err
+frontend-dev.out
+frontend-dev.err
+frontend/.next/
+frontend/node_modules/
+frontend/.env.local
+frontend/*.tsbuildinfo

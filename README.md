@@ -2,7 +2,7 @@
 
 A small Go URL shortener with:
 
-- A built-in browser UI at `/`
+- A Next.js frontend in `frontend/`
 - Email/password auth with JWT access cookies and refresh-token rotation
 - `POST /shorten` to create short links
 - `GET /links` to list the current user's links
@@ -16,12 +16,17 @@ A small Go URL shortener with:
 
 - Go
 - `net/http`
+- Chi
+- Next.js
+- React
+- TypeScript
 - PostgreSQL
 - Docker for local database setup
 
 ## Requirements
 
 - Go 1.25+
+- Node.js
 - Docker Desktop
 
 ## Local Setup
@@ -40,17 +45,40 @@ PORT=8081
 JWT_ACCESS_SECRET=replace-with-a-long-random-secret
 JWT_ISSUER=url-shortener
 APP_ENV=development
+FRONTEND_ORIGIN=http://localhost:3000
+```
+
+Install frontend dependencies:
+
+```powershell
+cd frontend
+npm install
 ```
 
 ## Run
+
+Start the Go API:
 
 ```powershell
 go run .
 ```
 
+Start the Next.js frontend in a second terminal:
+
+```powershell
+cd frontend
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
 ## API
 
-Home page:
+API info:
 
 ```http
 GET /
