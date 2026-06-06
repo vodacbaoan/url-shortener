@@ -26,10 +26,10 @@ A small Go URL shortener with:
 
 ## Local Setup
 
-Start PostgreSQL 18 in Docker:
+Start PostgreSQL 18 with Docker Compose:
 
 ```powershell
-docker run --name url-shortener-db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=url_shortener -p 5432:5432 -v url_shortener_pg18:/var/lib/postgresql -d postgres:18
+docker compose up -d
 ```
 
 Local configuration lives in `.env`. Example:

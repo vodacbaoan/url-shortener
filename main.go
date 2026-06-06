@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 const shortCodeLength = 6
@@ -250,6 +252,28 @@ func (s *server) handleStats(w http.ResponseWriter, r *http.Request) {
 	writeJSONResponse(w, http.StatusOK, stats)
 }
 
+func (s *server) routes() http.Handler {
+	r := chi.NewRouter()
+
+	r.Get("/", s.handleRoot)
+	r.Get("/healthz", s.handleHealthz)
+
+	r.Route("/auth", func(r chi.Router) {
+		r.Post("/signup", s.handleSignup)
+		r.Post("/login", s.handleLogin)
+		r.Post("/logout", s.handleLogout)
+		r.Post("/refresh", s.handleRefresh)
+	})
+
+	r.Get("/me", s.handleMe)
+	r.Get("/links", s.handleLinks)
+	r.Post("/shorten", s.handleShorten)
+	r.Get("/stats/{shortCode}", s.handleStats)
+	r.Get("/{shortCode}", s.handleRoot)
+
+	return r
+}
+
 func main() {
 	if err := loadDotEnv(".env"); err != nil {
 		log.Fatal(err)
@@ -272,19 +296,8 @@ func main() {
 
 	srv := &server{storage: storage, auth: auth}
 
-	http.HandleFunc("/", srv.handleRoot)
-	http.HandleFunc("/healthz", srv.handleHealthz)
-	http.HandleFunc("/auth/signup", srv.handleSignup)
-	http.HandleFunc("/auth/login", srv.handleLogin)
-	http.HandleFunc("/auth/logout", srv.handleLogout)
-	http.HandleFunc("/auth/refresh", srv.handleRefresh)
-	http.HandleFunc("/me", srv.handleMe)
-	http.HandleFunc("/links", srv.handleLinks)
-	http.HandleFunc("/shorten", srv.handleShorten)
-	http.HandleFunc("/stats/", srv.handleStats)
-
 	addr := ":" + envOrDefault("PORT", "8081")
 	log.Printf("using postgres storage\n")
 	log.Printf("server listening on http://localhost%s\n", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
+	log.Fatal(http.ListenAndServe(addr, srv.routes()))
 }
