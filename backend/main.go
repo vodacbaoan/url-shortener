@@ -287,9 +287,6 @@ func main() {
 	if err := loadDotEnv(".env"); err != nil {
 		log.Fatal(err)
 	}
-	if err := loadDotEnv("../.env"); err != nil {
-		log.Fatal(err)
-	}
 
 	storage, closeStorage, err := newStorage()
 	if err != nil {
