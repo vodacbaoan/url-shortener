@@ -1,7 +1,8 @@
 # URL Shortener
 
-A small Go URL shortener with:
+A small URL shortener with:
 
+- A Go API in `backend/`
 - A Next.js frontend in `frontend/`
 - Email/password auth with JWT access cookies and refresh-token rotation
 - `POST /shorten` to create short links
@@ -37,7 +38,8 @@ Start PostgreSQL 18 with Docker Compose:
 docker compose up -d
 ```
 
-Local configuration lives in `.env`. Example:
+Local configuration can live in `backend/.env` or in `.env` at the repo root.
+Example:
 
 ```env
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/url_shortener?sslmode=disable
@@ -60,6 +62,7 @@ npm install
 Start the Go API:
 
 ```powershell
+cd backend
 go run .
 ```
 
@@ -68,6 +71,13 @@ Start the Next.js frontend in a second terminal:
 ```powershell
 cd frontend
 npm run dev
+```
+
+Run backend tests:
+
+```powershell
+cd backend
+go test ./...
 ```
 
 Open:
