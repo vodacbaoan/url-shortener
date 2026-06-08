@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres:18
+    image: postgres:17-alpine
     container_name: url-shortener-db
     restart: unless-stopped
     environment:
@@ -10,12 +10,44 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - url_shortener_pg18:/var/lib/postgresql
+      - url_shortener_pg17:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d url_shortener"]
       interval: 10s
       timeout: 5s
       retries: 5
 
+  backend:
+    build:
+      context: ./backend
+    container_name: url-shortener-backend
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgres://postgres:postgres@db:5432/url_shortener?sslmode=disable"
+      PORT: "8081"
+      JWT_ACCESS_SECRET: "${JWT_ACCESS_SECRET:-replace-with-a-long-random-secret}"
+      JWT_ISSUER: url-shortener
+      APP_ENV: development
+      FRONTEND_ORIGIN: http://localhost:3000
+    ports:
+      - "8081:8081"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8081
+    container_name: url-shortener-frontend
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8081
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
 volumes:
-  url_shortener_pg18:
+  url_shortener_pg17:

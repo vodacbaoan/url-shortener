@@ -286,6 +286,25 @@ func TestHandleLinksReturnsOwnedLinks(t *testing.T) {
 	}
 }
 
+func TestHandleLinksReturnsEmptyArrayWhenUserHasNoLinks(t *testing.T) {
+	store := &stubURLStore{
+		userByID: userRecord{ID: 42, Email: "dev@example.com", CreatedAt: time.Now().UTC()},
+	}
+	srv := newTestServer(t, store)
+	req := httptest.NewRequest(http.MethodGet, "/links", nil)
+	addAccessCookie(t, req, srv, 42)
+	rec := httptest.NewRecorder()
+
+	srv.handleLinks(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
+		t.Fatalf("expected empty JSON array, got %q", body)
+	}
+}
+
 func TestHandleShortenRequiresAuth(t *testing.T) {
 	srv := newTestServer(t, &stubURLStore{})
 	req := httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(`{"url":"https://example.com"}`))

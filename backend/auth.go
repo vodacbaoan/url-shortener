@@ -585,6 +585,9 @@ func (s *server) handleLinks(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to load links", http.StatusInternalServerError)
 		return
 	}
+	if links == nil {
+		links = []ownedLinkResponse{}
+	}
 
 	writeJSONResponse(w, http.StatusOK, links)
 }

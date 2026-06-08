@@ -32,13 +32,26 @@ A small URL shortener with:
 
 ## Local Setup
 
-Start PostgreSQL 18 with Docker Compose:
+Run the full project with Docker Compose:
 
 ```powershell
-docker compose up -d
+docker compose up --build
 ```
 
-Local configuration can live in `backend/.env` or in `.env` at the repo root.
+Open:
+
+```text
+http://localhost:3000
+```
+
+Docker Compose starts:
+
+- PostgreSQL on `localhost:5432`
+- Go API on `localhost:8081`
+- Next.js frontend on `localhost:3000`
+
+For manual backend runs without Docker, local configuration lives in
+`backend/.env`. You can copy `backend/.env.example` and adjust values as needed.
 Example:
 
 ```env
@@ -59,14 +72,14 @@ npm install
 
 ## Run
 
-Start the Go API:
+Start the Go API manually:
 
 ```powershell
 cd backend
 go run .
 ```
 
-Start the Next.js frontend in a second terminal:
+Start the Next.js frontend manually in a second terminal:
 
 ```powershell
 cd frontend
