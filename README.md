@@ -11,7 +11,7 @@ A small URL shortener with:
 - `GET /{shortCode}` to redirect to the original URL
 - `GET /stats/{shortCode}` to view basic link analytics
 - Postgres-backed storage for persistence
-- Schema setup handled automatically on startup
+- Versioned SQL migrations handled automatically on startup
 
 ## Stack
 
@@ -92,6 +92,23 @@ Run backend tests:
 cd backend
 go test ./...
 ```
+
+## Migrations
+
+Database migrations live in:
+
+```text
+backend/migrations/
+```
+
+Migration files are ordered by numeric prefix, for example:
+
+```text
+000001_create_auth_and_urls.sql
+```
+
+The Go API runs any pending migrations on startup and records applied versions
+in the `schema_migrations` table.
 
 Open:
 
@@ -187,4 +204,4 @@ GET /links
 - `DATABASE_URL` is required; the app always uses PostgreSQL.
 - `JWT_ACCESS_SECRET` is required for signing access tokens.
 - Link creation and stats are authenticated; public redirects stay public.
-- The app ensures the required table/columns exist when it starts.
+- The app runs pending SQL migrations when it starts.
