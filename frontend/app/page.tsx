@@ -19,13 +19,6 @@ type ShortenResponse = {
   short_code: string;
 };
 
-type StatsResponse = {
-  short_code: string;
-  target_url: string;
-  click_count: number;
-  created_at: string;
-};
-
 const fallbackAPIBase = "http://localhost:8081";
 
 function trimTrailingSlash(value: string) {
@@ -49,11 +42,18 @@ export default function Home() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [longURL, setLongURL] = useState("");
-  const [statsCode, setStatsCode] = useState("");
+  const [statsSearch, setStatsSearch] = useState("");
   const [shortLink, setShortLink] = useState("");
-  const [stats, setStats] = useState<StatsResponse | null>(null);
-  const [status, setStatus] = useState("Checking session...");
+  const [status, setStatus] = useState("");
   const [busy, setBusy] = useState(false);
+  const statsFilter = statsSearch.trim().toLowerCase();
+  const filteredStatsLinks = useMemo(() => {
+    if (!statsFilter) {
+      return links;
+    }
+
+    return links.filter((link) => link.short_code.toLowerCase().includes(statsFilter));
+  }, [links, statsFilter]);
 
   function apiURL(path: string) {
     return `${apiBase}${path}`;
@@ -104,7 +104,7 @@ export default function Home() {
     if (response.status === 401) {
       setUser(null);
       setLinks([]);
-      setStatus("Not logged in.");
+      setStatus("");
       return;
     }
     if (!response.ok) {
@@ -114,7 +114,7 @@ export default function Home() {
 
     const currentUser = (await response.json()) as User;
     setUser(currentUser);
-    setStatus(`Logged in as ${currentUser.email}`);
+    setStatus("");
     await loadLinks();
   }
 
@@ -145,8 +145,8 @@ export default function Home() {
       setEmail("");
       setPassword("");
       setShortLink("");
-      setStats(null);
-      setStatus(`Logged in as ${currentUser.email}`);
+      setStatsSearch("");
+      setStatus("");
       await loadLinks();
     } catch {
       setStatus("Network error while authenticating.");
@@ -167,8 +167,8 @@ export default function Home() {
       setUser(null);
       setLinks([]);
       setShortLink("");
-      setStats(null);
-      setStatus("Logged out.");
+      setStatsSearch("");
+      setStatus("");
       setBusy(false);
     }
   }
@@ -182,6 +182,7 @@ export default function Home() {
 
     setBusy(true);
     setShortLink("");
+    setStatus("");
 
     try {
       const response = await apiFetch("/shorten", {
@@ -204,6 +205,7 @@ export default function Home() {
       const nextShortLink = `${apiBase}/${payload.short_code}`;
       setShortLink(nextShortLink);
       setLongURL("");
+      setStatsSearch("");
       setStatus("Short link created.");
       await loadLinks();
     } catch {
@@ -213,114 +215,70 @@ export default function Home() {
     }
   }
 
-  async function submitStats(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!user) {
-      setStatus("Log in to view stats.");
-      return;
-    }
-
-    setBusy(true);
-    setStats(null);
-
-    try {
-      const response = await apiFetch(`/stats/${encodeURIComponent(statsCode.trim())}`);
-      if (response.status === 401) {
-        setUser(null);
-        setStatus("Session expired. Log in again.");
-        return;
-      }
-      if (!response.ok) {
-        setStatus(await readError(response, "Unable to load stats."));
-        return;
-      }
-
-      setStats((await response.json()) as StatsResponse);
-      setStatus("Stats loaded.");
-    } catch {
-      setStatus("Network error while loading stats.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <main className="shell">
       <section className="workspace">
-        <header className="masthead">
+        <header className="page-header">  
           <div>
-            <p className="eyebrow">Go API + Next.js</p>
             <h1>URL Shortener</h1>
           </div>
+          {user ? (
+            <div className="user-menu">
+              <span>
+                Logged in as <strong>{user.email}</strong>
+              </span>
+              <button className="secondary" type="button" onClick={logout} disabled={busy}>
+                Log out
+              </button>
+            </div>
+          ) : (
+            <form className="header-auth" onSubmit={submitAuth}>
+              <div className="auth-tabs" role="tablist" aria-label="Auth mode">
+                <button
+                  className={authMode === "login" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAuthMode("login")}
+                >
+                  Log in
+                </button>
+                <button
+                  className={authMode === "signup" ? "active" : ""}
+                  type="button"
+                  onClick={() => setAuthMode("signup")}
+                >
+                  Sign up
+                </button>
+              </div>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                placeholder="you@example.com"
+                aria-label="Email"
+                required
+              />
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="Password"
+                aria-label="Password"
+                required
+              />
+              <button type="submit" disabled={busy}>
+                {authMode === "signup" ? "Create account" : "Log in"}
+              </button>
+            </form>
+          )}
+        </header>
+
+        {status ? (
           <div className="status" aria-live="polite">
             {status}
           </div>
-        </header>
+        ) : null}
 
         <div className="grid">
-          <section className="panel account-panel">
-            <div className="panel-heading">
-              <h2>Account</h2>
-              {user ? (
-                <button className="secondary" type="button" onClick={logout} disabled={busy}>
-                  Log out
-                </button>
-              ) : null}
-            </div>
-
-            {user ? (
-              <div className="signed-in">
-                <span>{user.email}</span>
-                <small>Member since {new Date(user.created_at).toLocaleDateString()}</small>
-              </div>
-            ) : (
-              <>
-                <div className="segments" role="tablist" aria-label="Auth mode">
-                  <button
-                    className={authMode === "login" ? "active" : ""}
-                    type="button"
-                    onClick={() => setAuthMode("login")}
-                  >
-                    Log in
-                  </button>
-                  <button
-                    className={authMode === "signup" ? "active" : ""}
-                    type="button"
-                    onClick={() => setAuthMode("signup")}
-                  >
-                    Sign up
-                  </button>
-                </div>
-
-                <form className="stack" onSubmit={submitAuth}>
-                  <label>
-                    Email
-                    <input
-                      type="email"
-                      value={email}
-                      onChange={(event) => setEmail(event.target.value)}
-                      placeholder="you@example.com"
-                      required
-                    />
-                  </label>
-                  <label>
-                    Password
-                    <input
-                      type="password"
-                      value={password}
-                      onChange={(event) => setPassword(event.target.value)}
-                      placeholder="At least 8 characters"
-                      required
-                    />
-                  </label>
-                  <button type="submit" disabled={busy}>
-                    {authMode === "signup" ? "Create account" : "Log in"}
-                  </button>
-                </form>
-              </>
-            )}
-          </section>
-
           <section className="panel shorten-panel">
             <div className="panel-heading">
               <h2>Shorten</h2>
@@ -371,7 +329,7 @@ export default function Home() {
                       </a>
                       <span>{link.target_url}</span>
                       <small>
-                        {link.click_count} clicks · {new Date(link.created_at).toLocaleString()}
+                        {link.click_count} clicks - {new Date(link.created_at).toLocaleString()}
                       </small>
                     </li>
                   );
@@ -384,41 +342,36 @@ export default function Home() {
             <div className="panel-heading">
               <h2>Stats</h2>
             </div>
-            <form className="inline-form" onSubmit={submitStats}>
-              <label>
-                Short code
-                <input
-                  type="text"
-                  value={statsCode}
-                  onChange={(event) => setStatsCode(event.target.value)}
-                  placeholder="Ab12Cd"
-                  disabled={!user || busy}
-                  required
-                />
-              </label>
-              <button type="submit" disabled={!user || busy}>
-                Load
-              </button>
-            </form>
+            <label>
+              Short code
+              <input
+                type="text"
+                value={statsSearch}
+                onChange={(event) => setStatsSearch(event.target.value)}
+                placeholder="Filter by short code"
+                disabled={!user || links.length === 0}
+              />
+            </label>
 
-            {stats ? (
+            {!user ? <p className="muted">Log in to view stats.</p> : null}
+            {user && links.length === 0 ? <p className="muted">No link stats yet.</p> : null}
+            {user && links.length > 0 && filteredStatsLinks.length === 0 ? (
+              <p className="muted">No matching short codes.</p>
+            ) : null}
+            {user && filteredStatsLinks.length > 0 ? (
               <dl className="stats">
-                <div>
-                  <dt>Target</dt>
-                  <dd>
-                    <a href={stats.target_url} target="_blank" rel="noreferrer">
-                      {stats.target_url}
-                    </a>
-                  </dd>
-                </div>
-                <div>
-                  <dt>Clicks</dt>
-                  <dd>{stats.click_count}</dd>
-                </div>
-                <div>
-                  <dt>Created</dt>
-                  <dd>{new Date(stats.created_at).toLocaleString()}</dd>
-                </div>
+                {filteredStatsLinks.map((link) => (
+                  <div key={link.short_code}>
+                    <dt>{link.short_code}</dt>
+                    <dd>
+                      <a href={`${apiBase}/${link.short_code}`} target="_blank" rel="noreferrer">
+                        {`${apiBase}/${link.short_code}`}
+                      </a>
+                    </dd>
+                    <dd>{link.click_count} clicks</dd>
+                    <dd>{new Date(link.created_at).toLocaleString()}</dd>
+                  </div>
+                ))}
               </dl>
             ) : null}
           </section>
