@@ -122,6 +122,26 @@ export default function Home() {
     void loadSession();
   }, []);
 
+  useEffect(() => {
+    if (!user) {
+      return;
+    }
+
+    function refreshLinks() {
+      if (document.visibilityState === "visible") {
+        void loadLinks();
+      }
+    }
+
+    window.addEventListener("focus", refreshLinks);
+    document.addEventListener("visibilitychange", refreshLinks);
+
+    return () => {
+      window.removeEventListener("focus", refreshLinks);
+      document.removeEventListener("visibilitychange", refreshLinks);
+    };
+  }, [user]);
+
   async function submitAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setBusy(true);
