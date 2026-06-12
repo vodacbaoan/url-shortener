@@ -13,7 +13,10 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-const shortCodeLength = 6
+const (
+	shortCodeLength      = 6
+	maxShortCodeAttempts = 10
+)
 
 type shortenRequest struct {
 	URL string `json:"url"`
@@ -37,6 +40,7 @@ type apiRootResponse struct {
 
 var errShortCodeExists = errors.New("short code already exists")
 var errShortCodeNotFound = errors.New("short code not found")
+var errShortCodeGenerationFailed = errors.New("failed to generate unique short code")
 
 type urlStorage interface {
 	Save(shortCode, targetURL string, userID int64) error
@@ -76,7 +80,7 @@ func logRequest(r *http.Request) {
 }
 
 func createShortCode(storage urlStorage, targetURL string, userID int64) (string, error) {
-	for {
+	for attempt := 0; attempt < maxShortCodeAttempts; attempt++ {
 		shortCode, err := generateShortCode()
 		if err != nil {
 			return "", err
@@ -88,6 +92,8 @@ func createShortCode(storage urlStorage, targetURL string, userID int64) (string
 			return "", err
 		}
 	}
+
+	return "", errShortCodeGenerationFailed
 }
 
 func generateShortCode() (string, error) {

@@ -14,18 +14,26 @@ type stubURLStore struct {
 	savedShortCode       string
 	savedTargetURL       string
 	savedUserID          int64
+	saveCalls            int
 	saveErr              error
+	saveErrs             []error
+	lookupShortCode      string
 	lookupTarget         string
 	lookupErr            error
 	incremented          []string
 	incrementErr         error
+	statsShortCode       string
 	stats                statsResponse
 	statsErr             error
 	statsRequestedUserID int64
+	createdEmail         string
+	createdPasswordHash  string
 	createdUser          userRecord
 	createUserErr        error
+	userByEmailRequested string
 	userByEmail          userRecord
 	userByEmailErr       error
+	userByIDRequested    int64
 	userByID             userRecord
 	userByIDErr          error
 	storedRefreshUserID  int64
@@ -39,18 +47,26 @@ type stubURLStore struct {
 	rotateErr            error
 	revokedTokens        []string
 	revokeErr            error
+	linksRequestedUserID int64
 	links                []ownedLinkResponse
 	linksErr             error
 }
 
 func (s *stubURLStore) Save(shortCode, targetURL string, userID int64) error {
+	s.saveCalls++
 	s.savedShortCode = shortCode
 	s.savedTargetURL = targetURL
 	s.savedUserID = userID
+	if len(s.saveErrs) > 0 {
+		err := s.saveErrs[0]
+		s.saveErrs = s.saveErrs[1:]
+		return err
+	}
 	return s.saveErr
 }
 
-func (s *stubURLStore) Lookup(string) (string, error) {
+func (s *stubURLStore) Lookup(shortCode string) (string, error) {
+	s.lookupShortCode = shortCode
 	return s.lookupTarget, s.lookupErr
 }
 
@@ -59,20 +75,25 @@ func (s *stubURLStore) IncrementClickCount(shortCode string) error {
 	return s.incrementErr
 }
 
-func (s *stubURLStore) GetStats(_ string, userID int64) (statsResponse, error) {
+func (s *stubURLStore) GetStats(shortCode string, userID int64) (statsResponse, error) {
+	s.statsShortCode = shortCode
 	s.statsRequestedUserID = userID
 	return s.stats, s.statsErr
 }
 
-func (s *stubURLStore) CreateUser(_ string, _ string) (userRecord, error) {
+func (s *stubURLStore) CreateUser(email, passwordHash string) (userRecord, error) {
+	s.createdEmail = email
+	s.createdPasswordHash = passwordHash
 	return s.createdUser, s.createUserErr
 }
 
-func (s *stubURLStore) GetUserByEmail(string) (userRecord, error) {
+func (s *stubURLStore) GetUserByEmail(email string) (userRecord, error) {
+	s.userByEmailRequested = email
 	return s.userByEmail, s.userByEmailErr
 }
 
-func (s *stubURLStore) GetUserByID(int64) (userRecord, error) {
+func (s *stubURLStore) GetUserByID(userID int64) (userRecord, error) {
+	s.userByIDRequested = userID
 	return s.userByID, s.userByIDErr
 }
 
@@ -95,7 +116,8 @@ func (s *stubURLStore) RevokeRefreshToken(tokenHash string) error {
 	return s.revokeErr
 }
 
-func (s *stubURLStore) ListOwnedLinks(int64) ([]ownedLinkResponse, error) {
+func (s *stubURLStore) ListOwnedLinks(userID int64) ([]ownedLinkResponse, error) {
+	s.linksRequestedUserID = userID
 	return s.links, s.linksErr
 }
 
@@ -159,6 +181,31 @@ func TestHandleSignupCreatesUserAndSetsCookies(t *testing.T) {
 	}
 }
 
+func TestHandleSignupNormalizesEmailAndHashesPassword(t *testing.T) {
+	store := &stubURLStore{
+		createdUser: userRecord{ID: 7, Email: "dev@example.com", CreatedAt: time.Now().UTC()},
+	}
+	srv := newTestServer(t, store)
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(`{"email":" Dev@Example.COM ","password":"password123"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.handleSignup(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+	if store.createdEmail != "dev@example.com" {
+		t.Fatalf("expected normalized email %q, got %q", "dev@example.com", store.createdEmail)
+	}
+	if store.createdPasswordHash == "" || store.createdPasswordHash == "password123" {
+		t.Fatalf("expected password to be stored as a hash, got %q", store.createdPasswordHash)
+	}
+	if err := srv.auth.verifyPassword("password123", store.createdPasswordHash); err != nil {
+		t.Fatalf("expected password hash to verify: %v", err)
+	}
+}
+
 func TestHandleSignupReturnsConflictForDuplicateEmail(t *testing.T) {
 	store := &stubURLStore{createUserErr: errUserExists}
 	srv := newTestServer(t, store)
@@ -170,6 +217,23 @@ func TestHandleSignupReturnsConflictForDuplicateEmail(t *testing.T) {
 
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected status %d, got %d", http.StatusConflict, rec.Code)
+	}
+}
+
+func TestHandleSignupRejectsTooLongPassword(t *testing.T) {
+	store := &stubURLStore{}
+	srv := newTestServer(t, store)
+	req := httptest.NewRequest(http.MethodPost, "/auth/signup", strings.NewReader(`{"email":"dev@example.com","password":"`+strings.Repeat("a", 73)+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	srv.handleSignup(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+	if store.createdEmail != "" {
+		t.Fatalf("expected user not to be created, got email %q", store.createdEmail)
 	}
 }
 
@@ -195,6 +259,9 @@ func TestHandleLoginSetsCookiesForValidCredentials(t *testing.T) {
 	}
 	if !hasCookie(rec, accessCookieName) || !hasCookie(rec, refreshCookieName) {
 		t.Fatalf("expected auth cookies to be set")
+	}
+	if store.userByEmailRequested != "dev@example.com" {
+		t.Fatalf("expected login lookup email %q, got %q", "dev@example.com", store.userByEmailRequested)
 	}
 }
 
@@ -262,6 +329,9 @@ func TestHandleMeReturnsCurrentUser(t *testing.T) {
 	if resp.Email != "dev@example.com" {
 		t.Fatalf("expected email %q, got %q", "dev@example.com", resp.Email)
 	}
+	if store.userByIDRequested != 42 {
+		t.Fatalf("expected user lookup ID %d, got %d", 42, store.userByIDRequested)
+	}
 }
 
 func TestHandleLinksReturnsOwnedLinks(t *testing.T) {
@@ -283,6 +353,9 @@ func TestHandleLinksReturnsOwnedLinks(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if store.linksRequestedUserID != 42 {
+		t.Fatalf("expected links lookup user ID %d, got %d", 42, store.linksRequestedUserID)
 	}
 }
 
@@ -350,8 +423,29 @@ func TestHandleShortenRejectsInvalidURL(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
 	}
-	if store.savedTargetURL != "" {
-		t.Fatalf("expected save not to be called, got %q", store.savedTargetURL)
+	if store.saveCalls != 0 {
+		t.Fatalf("expected save not to be called, got %d calls", store.saveCalls)
+	}
+}
+
+func TestHandleShortenRejectsBadOriginBeforeSaving(t *testing.T) {
+	store := &stubURLStore{
+		userByID: userRecord{ID: 42, Email: "dev@example.com", CreatedAt: time.Now().UTC()},
+	}
+	srv := newTestServer(t, store)
+	req := httptest.NewRequest(http.MethodPost, "/shorten", strings.NewReader(`{"url":"https://example.com"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://evil.example")
+	addAccessCookie(t, req, srv, 42)
+	rec := httptest.NewRecorder()
+
+	srv.handleShorten(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
+	}
+	if store.saveCalls != 0 {
+		t.Fatalf("expected save not to be called, got %d calls", store.saveCalls)
 	}
 }
 
@@ -400,6 +494,55 @@ func TestHandleShortenCreatesShortCodeForValidURL(t *testing.T) {
 	}
 	if len(resp.ShortCode) != shortCodeLength {
 		t.Fatalf("expected short code length %d, got %d", shortCodeLength, len(resp.ShortCode))
+	}
+}
+
+func TestCreateShortCodeRetriesWhenGeneratedCodeAlreadyExists(t *testing.T) {
+	store := &stubURLStore{
+		saveErrs: []error{errShortCodeExists, nil},
+	}
+
+	shortCode, err := createShortCode(store, "https://example.com", 42)
+
+	if err != nil {
+		t.Fatalf("expected short code to be created after retry: %v", err)
+	}
+	if len(shortCode) != shortCodeLength {
+		t.Fatalf("expected short code length %d, got %d", shortCodeLength, len(shortCode))
+	}
+	if store.saveCalls != 2 {
+		t.Fatalf("expected save to be called twice, got %d", store.saveCalls)
+	}
+	if store.savedTargetURL != "https://example.com" || store.savedUserID != 42 {
+		t.Fatalf("unexpected saved data: url=%q userID=%d", store.savedTargetURL, store.savedUserID)
+	}
+}
+
+func TestCreateShortCodeReturnsNonCollisionSaveError(t *testing.T) {
+	store := &stubURLStore{
+		saveErr: errors.New("database unavailable"),
+	}
+
+	if _, err := createShortCode(store, "https://example.com", 42); err == nil {
+		t.Fatalf("expected non-collision save error")
+	}
+	if store.saveCalls != 1 {
+		t.Fatalf("expected save to be called once, got %d", store.saveCalls)
+	}
+}
+
+func TestCreateShortCodeStopsAfterTooManyCollisions(t *testing.T) {
+	store := &stubURLStore{
+		saveErr: errShortCodeExists,
+	}
+
+	_, err := createShortCode(store, "https://example.com", 42)
+
+	if !errors.Is(err, errShortCodeGenerationFailed) {
+		t.Fatalf("expected retry limit error, got %v", err)
+	}
+	if store.saveCalls != maxShortCodeAttempts {
+		t.Fatalf("expected %d save attempts, got %d", maxShortCodeAttempts, store.saveCalls)
 	}
 }
 
@@ -464,6 +607,9 @@ func TestHandleRootRedirectsForKnownShortCode(t *testing.T) {
 	if location := rec.Header().Get("Location"); location != "https://example.com" {
 		t.Fatalf("expected redirect location %q, got %q", "https://example.com", location)
 	}
+	if store.lookupShortCode != "abc123" {
+		t.Fatalf("expected lookup short code %q, got %q", "abc123", store.lookupShortCode)
+	}
 	if len(store.incremented) != 1 || store.incremented[0] != "abc123" {
 		t.Fatalf("expected click count increment for %q, got %#v", "abc123", store.incremented)
 	}
@@ -526,6 +672,9 @@ func TestHandleStatsReturnsJSONForKnownShortCode(t *testing.T) {
 	}
 	if store.statsRequestedUserID != 42 {
 		t.Fatalf("expected owner ID %d, got %d", 42, store.statsRequestedUserID)
+	}
+	if store.statsShortCode != "abc123" {
+		t.Fatalf("expected stats short code %q, got %q", "abc123", store.statsShortCode)
 	}
 
 	var resp statsResponse
@@ -605,5 +754,18 @@ func TestRoutesAllowConfiguredFrontendOriginPreflight(t *testing.T) {
 	}
 	if credentials := rec.Header().Get("Access-Control-Allow-Credentials"); credentials != "true" {
 		t.Fatalf("expected credentials CORS header, got %q", credentials)
+	}
+}
+
+func TestRoutesRejectBadOriginPreflight(t *testing.T) {
+	srv := newTestServer(t, &stubURLStore{})
+	req := httptest.NewRequest(http.MethodOptions, "/auth/login", nil)
+	req.Header.Set("Origin", "http://evil.example")
+	rec := httptest.NewRecorder()
+
+	srv.routes().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected status %d, got %d", http.StatusForbidden, rec.Code)
 	}
 }

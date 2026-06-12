@@ -239,6 +239,9 @@ func validatePassword(password string) error {
 	if len(strings.TrimSpace(password)) < 8 {
 		return errors.New("password must be at least 8 characters")
 	}
+	if len(password) > 72 {
+		return errors.New("password must be at most 72 bytes")
+	}
 
 	return nil
 }
