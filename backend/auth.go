@@ -150,13 +150,23 @@ func hashToken(value string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+func (a *authManager) cookieSameSiteMode() http.SameSite {
+	if a.secureCookies {
+		return http.SameSiteNoneMode
+	}
+
+	return http.SameSiteLaxMode
+}
+
 func (a *authManager) setAuthCookies(w http.ResponseWriter, accessToken, refreshToken string) {
+	sameSiteMode := a.cookieSameSiteMode()
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     accessCookieName,
 		Value:    accessToken,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSiteMode,
 		Secure:   a.secureCookies,
 		MaxAge:   int(a.accessTTL.Seconds()),
 	})
@@ -166,20 +176,22 @@ func (a *authManager) setAuthCookies(w http.ResponseWriter, accessToken, refresh
 		Value:    refreshToken,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
+		SameSite: sameSiteMode,
 		Secure:   a.secureCookies,
 		MaxAge:   int(a.refreshTTL.Seconds()),
 	})
 }
 
 func (a *authManager) clearAuthCookies(w http.ResponseWriter) {
+	sameSiteMode := a.cookieSameSiteMode()
+
 	for _, cookieName := range []string{accessCookieName, refreshCookieName} {
 		http.SetCookie(w, &http.Cookie{
 			Name:     cookieName,
 			Value:    "",
 			Path:     "/",
 			HttpOnly: true,
-			SameSite: http.SameSiteLaxMode,
+			SameSite: sameSiteMode,
 			Secure:   a.secureCookies,
 			MaxAge:   -1,
 		})

@@ -159,6 +159,60 @@ func hasCookie(rec *httptest.ResponseRecorder, cookieName string) bool {
 	return false
 }
 
+func findCookie(rec *httptest.ResponseRecorder, cookieName string) *http.Cookie {
+	for _, cookie := range rec.Result().Cookies() {
+		if cookie.Name == cookieName {
+			return cookie
+		}
+	}
+
+	return nil
+}
+
+func TestAuthCookiesUseSameSiteNoneWhenSecure(t *testing.T) {
+	auth := &authManager{
+		accessTTL:     15 * time.Minute,
+		refreshTTL:    24 * time.Hour,
+		secureCookies: true,
+	}
+	rec := httptest.NewRecorder()
+
+	auth.setAuthCookies(rec, "access-token", "refresh-token")
+
+	accessCookie := findCookie(rec, accessCookieName)
+	if accessCookie == nil {
+		t.Fatalf("expected access cookie")
+	}
+	if accessCookie.SameSite != http.SameSiteNoneMode {
+		t.Fatalf("expected SameSite=None, got %v", accessCookie.SameSite)
+	}
+	if !accessCookie.Secure {
+		t.Fatalf("expected secure cookie")
+	}
+}
+
+func TestAuthCookiesUseSameSiteLaxWhenNotSecure(t *testing.T) {
+	auth := &authManager{
+		accessTTL:     15 * time.Minute,
+		refreshTTL:    24 * time.Hour,
+		secureCookies: false,
+	}
+	rec := httptest.NewRecorder()
+
+	auth.setAuthCookies(rec, "access-token", "refresh-token")
+
+	accessCookie := findCookie(rec, accessCookieName)
+	if accessCookie == nil {
+		t.Fatalf("expected access cookie")
+	}
+	if accessCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("expected SameSite=Lax, got %v", accessCookie.SameSite)
+	}
+	if accessCookie.Secure {
+		t.Fatalf("expected non-secure cookie")
+	}
+}
+
 func TestHandleSignupCreatesUserAndSetsCookies(t *testing.T) {
 	store := &stubURLStore{
 		createdUser: userRecord{ID: 7, Email: "dev@example.com", CreatedAt: time.Now().UTC()},
