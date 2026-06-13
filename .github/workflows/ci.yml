@@ -4,9 +4,23 @@ on:
   push:
 
 jobs:
-  backend-test:
-    name: Backend tests
+  backend:
+    name: Backend
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: url_shortener_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d url_shortener_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - name: Check out code
@@ -21,9 +35,15 @@ jobs:
       - name: Run Go tests
         working-directory: backend
         run: go test ./...
+        env:
+          INTEGRATION_DATABASE_URL: postgres://postgres:postgres@localhost:5432/url_shortener_test?sslmode=disable
 
-  frontend-build:
-    name: Frontend build
+      - name: Run Go vet
+        working-directory: backend
+        run: go vet ./...
+
+  frontend:
+    name: Frontend
     runs-on: ubuntu-latest
 
     steps:
@@ -46,3 +66,7 @@ jobs:
         run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Typecheck frontend
+        working-directory: frontend
+        run: npm run typecheck

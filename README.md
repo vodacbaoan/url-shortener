@@ -93,6 +93,17 @@ cd backend
 go test ./...
 ```
 
+Run backend integration tests against Postgres:
+
+```powershell
+cd backend
+$env:INTEGRATION_DATABASE_URL="postgres://postgres:postgres@localhost:5432/url_shortener?sslmode=disable"
+go test ./...
+```
+
+The integration tests create a temporary Postgres schema and drop it after the
+test run.
+
 ## Migrations
 
 Database migrations live in:
