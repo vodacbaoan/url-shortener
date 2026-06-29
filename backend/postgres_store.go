@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"time"
@@ -17,6 +18,10 @@ func newPostgresURLStore(databaseURL string) (*postgresURLStore, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
@@ -306,6 +311,10 @@ func (s *postgresURLStore) ListOwnedLinks(userID int64) ([]ownedLinkResponse, er
 	}
 
 	return links, nil
+}
+
+func (s *postgresURLStore) Ping(ctx context.Context) error {
+	return s.db.PingContext(ctx)
 }
 
 func (s *postgresURLStore) Close() error {

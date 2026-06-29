@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -50,6 +51,7 @@ type stubURLStore struct {
 	linksRequestedUserID int64
 	links                []ownedLinkResponse
 	linksErr             error
+	pingErr              error
 }
 
 func (s *stubURLStore) Save(shortCode, targetURL string, userID int64) error {
@@ -119,6 +121,10 @@ func (s *stubURLStore) RevokeRefreshToken(tokenHash string) error {
 func (s *stubURLStore) ListOwnedLinks(userID int64) ([]ownedLinkResponse, error) {
 	s.linksRequestedUserID = userID
 	return s.links, s.linksErr
+}
+
+func (s *stubURLStore) Ping(context.Context) error {
+	return s.pingErr
 }
 
 func newTestServer(t *testing.T, store *stubURLStore) *server {
@@ -769,6 +775,33 @@ func TestHandleHealthzReturnsOK(t *testing.T) {
 	}
 	if rec.Body.String() != "ok\n" {
 		t.Fatalf("expected body %q, got %q", "ok\n", rec.Body.String())
+	}
+}
+
+func TestHandleReadyzReturnsOKWhenStoragePings(t *testing.T) {
+	srv := newTestServer(t, &stubURLStore{})
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if rec.Body.String() != "ok\n" {
+		t.Fatalf("expected body %q, got %q", "ok\n", rec.Body.String())
+	}
+}
+
+func TestHandleReadyzReturnsUnavailableWhenStoragePingFails(t *testing.T) {
+	srv := newTestServer(t, &stubURLStore{pingErr: errors.New("database unavailable")})
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	srv.handleReadyz(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected status %d, got %d", http.StatusServiceUnavailable, rec.Code)
 	}
 }
 

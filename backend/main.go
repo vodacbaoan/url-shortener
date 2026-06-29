@@ -57,6 +57,7 @@ type urlStorage interface {
 	RotateRefreshToken(currentTokenHash, newTokenHash string, expiresAt time.Time) (int64, error)
 	RevokeRefreshToken(tokenHash string) error
 	ListOwnedLinks(userID int64) ([]ownedLinkResponse, error)
+	Ping(ctx context.Context) error
 }
 
 type server struct {
@@ -186,6 +187,27 @@ func (s *server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write([]byte("ok\n"))
 }
 
+func (s *server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	logRequest(r)
+
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := s.storage.Ping(ctx); err != nil {
+		log.Printf("readiness check failed: %v\n", err)
+		http.Error(w, "not ready", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("ok\n"))
+}
+
 func (s *server) handleShorten(w http.ResponseWriter, r *http.Request) {
 	logRequest(r)
 
@@ -275,6 +297,7 @@ func (s *server) routes() http.Handler {
 
 	r.Get("/", s.handleRoot)
 	r.Get("/healthz", s.handleHealthz)
+	r.Get("/readyz", s.handleReadyz)
 
 	r.Route("/auth", func(r chi.Router) {
 		r.Post("/signup", s.handleSignup)
